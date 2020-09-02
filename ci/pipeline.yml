@@ -1,0 +1,150 @@
+resource_types:
+- name: pull-request
+  type: docker-image
+  source:
+    repository: teliaoss/github-pr-resource
+
+resources:
+- name: pull-request
+  type: pull-request
+  check_every: 1m
+  source:
+    repository: xetamus/vtp
+    base_branch: master
+    access_token: ((github_access_token))
+
+- name: version
+  type: semver
+  source:
+    initial_version: 0.0.0
+    driver: git
+    uri: git@github.com:xetamus/vtp.git
+    branch: versions
+    file: version
+    private_key: ((git_repo_deploy_key))
+
+- name: vtp
+  type: git
+  source:
+    uri: git@github.com:xetamus/vtp.git
+    branch: master
+    private_key: ((git_repo_deploy_key))
+
+- name: vtp-release
+  type: github-release
+  source:
+    owner: xetamus
+    repository: vtp
+    access_token: ((github_access_token))
+
+jobs:
+- name: pull-request
+  plan:
+  - in_parallel:
+    - get: pull-request
+      trigger: true
+      version: every
+    - get: version
+    - get: vtp
+
+  - put: pull-request
+    params:
+      path: pull-request
+      status: pending
+
+  - do:
+    - task: unit-test
+      config:
+        platform: linux
+        image_resource:
+          type: docker-image
+          source: {repository: golang, tag: "latest"}
+        inputs:
+          - name: pull-request
+        run:
+          dir: pull-request
+          path: /usr/local/go/bin/go
+          args:
+            - test
+            - --cover
+    - task: build
+      file: pull-request/ci/tasks/build/task.yml
+    on_failure:
+      put: pull-request
+      params:
+        path: pull-request
+        status: failure
+
+  - put: pull-request
+    params:
+      path: pull-request
+      status: success
+
+- name: commit
+  plan:
+  - in_parallel:
+    - get: vtp
+      trigger: true
+    - get: version
+      params:
+        pre: pre
+
+  - task: unit-test
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source: {repository: golang, tag: "latest"}
+      inputs:
+        - name: vtp
+      run:
+        dir: vtp
+        path: /usr/local/go/bin/go
+        args:
+          - test
+          - --cover
+
+  - in_parallel:
+    - task: build
+      config:
+        platform: linux
+        image_resource:
+          type: docker-image
+          source: {repository: golang, tag: "latest"}
+        inputs:
+          - name: vtp
+        outputs:
+          - name: release
+        run:
+          dir: vtp
+          path: /usr/local/go/bin/go
+          args:
+            - build
+            - -o
+            - ../release
+
+    - task: release-name
+      config:
+        platform: linux
+        image_resource:
+          type: docker-image
+          source: {repository: alpine, tag: "latest"}
+        outputs:
+          - name: release-name
+        run:
+          path: /bin/sh
+          args:
+            - -c
+            - |
+              echo "vtp" > release-name/name
+
+  - put: version
+    params:
+      file: version/version
+
+  - put: vtp-release
+    params:
+      name: release-name/name
+      tag: version/version
+      globs:
+      - release/vtp*
