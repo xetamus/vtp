@@ -87,7 +87,7 @@ jobs:
       trigger: true
     - get: version
       params:
-        pre: patch
+        bump: patch
 
   - task: unit-test
     config:
