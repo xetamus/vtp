@@ -25,6 +25,7 @@ var vaultCache map[string]string = map[string]string{}
 func main() {
 	var args struct {
 		InPlace	bool     `arg:"-i,--inplace" help:"Overwrite input files"`
+		Quiet   bool     `arg:"-q,--quiet" help:"Suppress output (useful when writing files in place)"`
 		Debug   bool		 `arg:"-d,--debug" help:"Enable debug logging" default:"false"`
 		Files   []string `arg:"positional,required" help:"List of files to run against"`
 	}
@@ -83,7 +84,9 @@ func main() {
 		}
 
 		for _, line := range output {
-			fmt.Println(line)
+			if !args.Quiet {
+				fmt.Println(line)
+			}
 			if args.InPlace {
 				_, _ = fileWriter.WriteString(line + "\n")
 			  fileWriter.Flush()
